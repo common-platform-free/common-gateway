@@ -1,0 +1,29 @@
+server:
+  port: 9000
+
+spring:
+  application:
+    name: common-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: iam-service
+          uri: http://localhost:9001
+          predicates:
+            - Path=/iam/**
+        - id: business-service
+          uri: http://localhost:9002
+          predicates:
+            - Path=/business/**
+
+gateway:
+  auth:
+    white-list:
+      - /iam/auth/login
+      - /iam/auth/refresh
+      - /iam/auth/logout
+      - /iam/actuator/health
+
+jwt:
+  secret-url: ${IAM_JWT_SECRET_URL:http://localhost:9001/internal/jwt/secret}
+  secret-fetch-timeout-seconds: 5
