@@ -1,0 +1,188 @@
+{
+  "info": {
+    "_postman_id": "cc6ac16e-a012-4d29-b2db-aaaf43f711f3",
+    "name": "common-gateway auth",
+    "description": "Local tests for common-gateway + common-iam authentication flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "认证",
+      "item": [
+        {
+          "name": "登录 - 通过 Gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('业务响应 code=0', function () {",
+                  "  pm.expect(json.code).to.eql(0);",
+                  "});",
+                  "",
+                  "pm.test('返回登录用户信息', function () {",
+                  "  pm.expect(json.data).to.be.an('object');",
+                  "  pm.expect(json.data.userId).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.data.username).to.eql(pm.environment.get('username'));",
+                  "  pm.expect(json.data.roles).to.be.an('array');",
+                  "});",
+                  "",
+                  "const setCookieHeaders = pm.response.headers.all()",
+                  "  .filter(header => header.key.toLowerCase() === 'set-cookie')",
+                  "  .map(header => header.value);",
+                  "",
+                  "pm.test('写入 access_token Cookie', function () {",
+                  "  pm.expect(setCookieHeaders.some(value => value.startsWith('access_token='))).to.eql(true);",
+                  "});",
+                  "",
+                  "pm.test('写入 refresh_token Cookie', function () {",
+                  "  pm.expect(setCookieHeaders.some(value => value.startsWith('refresh_token='))).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gateway_base_url}}/iam/auth/login",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "iam",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login through Gateway. This route is in the gateway white list, so no Authorization header is required. Tokens are returned as HttpOnly cookies."
+          },
+          "response": []
+        },
+        {
+          "name": "当前用户 - Cookie 访问",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('业务响应 code=0', function () {",
+                  "  pm.expect(json.code).to.eql(0);",
+                  "});",
+                  "",
+                  "pm.test('Gateway 已校验 Cookie token 并透传用户头', function () {",
+                  "  pm.expect(json.data).to.be.an('object');",
+                  "  pm.expect(json.data.userId).to.be.a('string').and.not.empty;",
+                  "  pm.expect(json.data.username).to.eql(pm.environment.get('username'));",
+                  "  pm.expect(json.data.roles).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/iam/auth/me",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "iam",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Run login first. Postman stores the access_token cookie, then Gateway reads that cookie, validates JWT, and forwards X-User-* headers to IAM."
+          },
+          "response": []
+        },
+        {
+          "name": "当前用户 - 无 Token 返回 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('返回网关统一 401 JSON', function () {",
+                  "  pm.expect(json.code).to.eql(401);",
+                  "  pm.expect(json.message).to.eql('token无效或已过期');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const jar = pm.cookies.jar();",
+                  "jar.clear(pm.environment.get('gateway_base_url'), function (error) {",
+                  "  if (error) {",
+                  "    console.log(error);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/iam/auth/me",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "iam",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "This request clears Gateway cookies before sending, so it should be blocked by Gateway."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "_postman_exported_using": "Codex"
+}

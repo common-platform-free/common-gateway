@@ -4,41 +4,42 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
 @Service
 public class JwtTokenService {
 
-    private final SecretKey secretKey;
+    private final PublicKey publicKey;
     private final ObjectMapper objectMapper;
 
-    public JwtTokenService(@Value("${jwt.secret-url}") String secretUrl,
-                           @Value("${jwt.secret-fetch-timeout-seconds:5}") long timeoutSeconds,
+    public JwtTokenService(@Value("${jwt.public-key-url}") String publicKeyUrl,
+                           @Value("${jwt.public-key-fetch-timeout-seconds:5}") long timeoutSeconds,
                            WebClient.Builder webClientBuilder,
                            ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
 
-        String secret = fetchSecret(secretUrl, timeoutSeconds, webClientBuilder);
-        if (!StringUtils.hasText(secret)) {
-            throw new IllegalStateException("JWT secret fetched from IAM/Auth is empty");
+        String publicKeyPem = fetchPublicKey(publicKeyUrl, timeoutSeconds, webClientBuilder);
+        if (!StringUtils.hasText(publicKeyPem)) {
+            throw new IllegalStateException("JWT public key fetched from IAM/Auth is empty");
         }
-        this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.publicKey = parsePublicKey(publicKeyPem);
     }
 
     public JwtUserInfo parseAndValidate(String token) {
         Claims claims = Jwts.parser()
-                .verifyWith(secretKey)
+                .verifyWith(publicKey)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
@@ -49,6 +50,9 @@ public class JwtTokenService {
 
         if (userId == null || userId.isBlank() || username == null || username.isBlank()) {
             throw new IllegalArgumentException("JWT missing required user claims");
+        }
+        if (!"access".equals(claims.get("typ", String.class))) {
+            throw new IllegalArgumentException("JWT typ must be access");
         }
 
         return new JwtUserInfo(userId, username, roles);
@@ -76,23 +80,23 @@ public class JwtTokenService {
         return Collections.emptyList();
     }
 
-    private String fetchSecret(String secretUrl, long timeoutSeconds, WebClient.Builder webClientBuilder) {
+    private String fetchPublicKey(String publicKeyUrl, long timeoutSeconds, WebClient.Builder webClientBuilder) {
         try {
             String responseBody = webClientBuilder
                     .build()
                     .get()
-                    .uri(secretUrl)
+                    .uri(publicKeyUrl)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block(Duration.ofSeconds(timeoutSeconds));
 
-            return extractSecret(responseBody);
+            return extractPublicKey(responseBody);
         } catch (Exception ex) {
-            throw new IllegalStateException("Failed to fetch JWT secret from IAM/Auth: " + secretUrl, ex);
+            throw new IllegalStateException("Failed to fetch JWT public key from IAM/Auth: " + publicKeyUrl, ex);
         }
     }
 
-    private String extractSecret(String responseBody) throws Exception {
+    private String extractPublicKey(String responseBody) throws Exception {
         if (!StringUtils.hasText(responseBody)) {
             return null;
         }
@@ -107,20 +111,20 @@ public class JwtTokenService {
             return root.asText();
         }
 
-        JsonNode secretNode = firstTextNode(root, "secret", "jwtSecret", "value");
-        if (secretNode != null) {
-            return secretNode.asText();
+        JsonNode publicKeyNode = firstTextNode(root, "publicKey", "accessPublicKey", "value");
+        if (publicKeyNode != null) {
+            return publicKeyNode.asText();
         }
 
         JsonNode dataNode = root.get("data");
         if (dataNode != null) {
-            JsonNode dataSecretNode = firstTextNode(dataNode, "secret", "jwtSecret", "value");
-            if (dataSecretNode != null) {
-                return dataSecretNode.asText();
+            JsonNode dataPublicKeyNode = firstTextNode(dataNode, "publicKey", "accessPublicKey", "value");
+            if (dataPublicKeyNode != null) {
+                return dataPublicKeyNode.asText();
             }
         }
 
-        throw new IllegalArgumentException("IAM/Auth secret response must be plain text or contain secret");
+        throw new IllegalArgumentException("IAM/Auth public key response must be plain text or contain publicKey");
     }
 
     private JsonNode firstTextNode(JsonNode root, String... fieldNames) {
@@ -131,5 +135,19 @@ public class JwtTokenService {
             }
         }
         return null;
+    }
+
+    private PublicKey parsePublicKey(String pem) {
+        try {
+            String content = pem
+                    .replace("-----BEGIN PUBLIC KEY-----", "")
+                    .replace("-----END PUBLIC KEY-----", "")
+                    .replaceAll("\\s+", "");
+            byte[] keyBytes = Base64.getDecoder().decode(content);
+            X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
+            return KeyFactory.getInstance("RSA").generatePublic(keySpec);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Invalid RSA public key from IAM/Auth", ex);
+        }
     }
 }

@@ -18,6 +18,7 @@ spring:
 
 gateway:
   auth:
+    access-token-cookie-name: access_token
     white-list:
       - /iam/auth/login
       - /iam/auth/refresh
@@ -25,5 +26,5 @@ gateway:
       - /iam/actuator/health
 
 jwt:
-  secret-url: ${IAM_JWT_SECRET_URL:http://localhost:9001/internal/jwt/secret}
-  secret-fetch-timeout-seconds: 5
+  public-key-url: ${IAM_JWT_PUBLIC_KEY_URL:http://localhost:9001/iam/internal/jwt/public-key}
+  public-key-fetch-timeout-seconds: 5

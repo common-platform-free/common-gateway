@@ -11,6 +11,7 @@ import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpCookie;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -52,12 +53,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-        if (!StringUtils.hasText(authorization) || !authorization.startsWith(BEARER_PREFIX)) {
-            return unauthorized(exchange);
-        }
-
-        String token = authorization.substring(BEARER_PREFIX.length()).trim();
+        String token = resolveToken(exchange);
         if (!StringUtils.hasText(token)) {
             return unauthorized(exchange);
         }
@@ -91,6 +87,21 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         return authProperties.getWhiteList()
                 .stream()
                 .anyMatch(pattern -> pathMatcher.match(pattern, path));
+    }
+
+    private String resolveToken(ServerWebExchange exchange) {
+        String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (StringUtils.hasText(authorization)) {
+            if (!authorization.startsWith(BEARER_PREFIX)) {
+                return null;
+            }
+            return authorization.substring(BEARER_PREFIX.length()).trim();
+        }
+
+        HttpCookie accessTokenCookie = exchange.getRequest()
+                .getCookies()
+                .getFirst(authProperties.getAccessTokenCookieName());
+        return accessTokenCookie == null ? null : accessTokenCookie.getValue();
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange) {
